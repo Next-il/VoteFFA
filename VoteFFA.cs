@@ -31,6 +31,7 @@ public partial class VoteFFAPlugin : BasePlugin, IPluginConfig<Config>
 
 	public int DelayBetweenVotes = 25;
 	public int VoteDuration = 30;
+	public int LastVoteTime = 0;
 
 	public bool isVoteActive = false;
 	public bool IsFFAActive = false;
@@ -83,6 +84,13 @@ public partial class VoteFFAPlugin : BasePlugin, IPluginConfig<Config>
 		if (isVoteActive)
 		{
 			Helper.AdvancedPrintToChat(caller, Localizer["vote.already-in-progress"]);
+			return;
+		}
+
+		// Check if there is a delay between votes
+		if (LastVoteTime + DelayBetweenVotes > (int)DateTime.UtcNow.Subtract(new DateTime(1970, 1, 1)).TotalSeconds)
+		{
+			Helper.AdvancedPrintToChat(caller, Localizer["vote.delay", LastVoteTime + DelayBetweenVotes - (int)DateTime.UtcNow.Subtract(new DateTime(1970, 1, 1)).TotalSeconds]);
 			return;
 		}
 
@@ -155,6 +163,9 @@ public partial class VoteFFAPlugin : BasePlugin, IPluginConfig<Config>
 		VotedPlayers.Clear();
 		voteData.Clear();
 		isVoteActive = false;
+
+		// Unix timestamp
+		LastVoteTime = (int)DateTime.UtcNow.Subtract(new DateTime(1970, 1, 1)).TotalSeconds;
 	}
 
 	void AddVote(string candidate)
