@@ -11,10 +11,10 @@ Config Located In `addons\counterstrikesharp\plugins\configs\VoteFFA\VoteFFA.jso
 ```json
 {
   // Delay between votes
-  "Delay": true,
+  "Delay": 25,
 
   // Vote duration
-  "VoteDuration": false,
+  "VoteDuration": 30,
 }
 ```
 
@@ -45,6 +45,7 @@ Config Located In `addons\counterstrikesharp\plugins\configs\VoteFFA\VoteFFA.jso
 	"player.vote-success": "You have voted {lime}{0}{default}.",
 	"vote.success": "The vote has passed, {lime}FFA{default} will be activated from the next round.",
 	"vote.failed": "The vote has failed (not enough votes).",
-	"ffa.state.enabled": "FFA is enabled! Type {lime}!ffa{default} to disable it."
+	"ffa.state.enabled": "FFA is enabled! Type {lime}!ffa{default} to disable it.",
+	"vote.delay": "You must wait {lime}{0}{default} seconds before starting a new vote."
 }
 ```
