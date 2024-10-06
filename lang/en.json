@@ -1,0 +1,13 @@
+{
+  "prefix": "{lime}➜ {grey}FFA {lime}|{default}",
+  "vote.enable.title": "Enable FFA?",
+  "vote.disable.title": "Disable FFA?",
+  "vote.already-in-progress": "A vote is already in progress.",
+  "vote.answers.yes": "Yes",
+  "vote.answers.no": "No",
+  "player.already-voted": "You have already voted.",
+  "player.vote-success": "You have voted {lime}{0}{default}.",
+  "vote.success": "The vote has passed, {lime}FFA{default} will be activated from the next round.",
+  "vote.failed": "The vote has failed (not enough votes).",
+  "ffa.state.enabled": "FFA is enabled! Type {lime}!ffa{default} to disable it."
+}
