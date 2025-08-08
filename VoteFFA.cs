@@ -3,8 +3,9 @@ using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Core.Attributes;
 using CounterStrikeSharp.API.Core.Attributes.Registration;
 using CounterStrikeSharp.API.Modules.Commands;
-using CounterStrikeSharp.API.Modules.Menu;
-using CounterStrikeSharp.API.Modules.Utils;
+using CS2MenuManager.API.Class;
+using CS2MenuManager.API.Enum;
+using CS2MenuManager.API.Menu;
 using Microsoft.Extensions.Localization;
 using System.Text.Json.Serialization;
 
@@ -19,7 +20,7 @@ public class Config : BasePluginConfig
 	public int VoteDuration { get; set; } = 30; // Vote duration
 };
 
-[MinimumApiVersion(244)]
+[MinimumApiVersion(333)]
 public partial class VoteFFAPlugin : BasePlugin, IPluginConfig<Config>
 {
 	public override string ModuleName => "VoteFFA";
@@ -29,7 +30,7 @@ public partial class VoteFFAPlugin : BasePlugin, IPluginConfig<Config>
 
 	internal static IStringLocalizer? Stringlocalizer;
 
-	public int DelayBetweenVotes = 25;
+	public int DelayBetweenVotes = 60;
 	public int VoteDuration = 30;
 	public int LastVoteTime = 0;
 
@@ -49,33 +50,6 @@ public partial class VoteFFAPlugin : BasePlugin, IPluginConfig<Config>
 	{
 		base.Load(hotReload);
 		Stringlocalizer = Localizer;
-
-		RegisterListener<Listeners.OnTick>(() =>
-		{
-			if (isVoteActive)
-			{
-				int choice = 1;
-
-				string message = $"<font color='White'>{Localizer[$"vote.{(IsFFAActive ? "disable" : "enable")}.title"]}</font>";
-
-				foreach (KeyValuePair<string, int> vote in voteData)
-				{
-					message += $"<br>!<font color='#a5feff'>{choice}</font> " + vote.Key + $" <font color='#a5feff'>[{vote.Value}]</font>";
-					choice++;
-				}
-
-				Utilities.GetPlayers().Where(p => p is { IsValid: true, IsBot: false, IsHLTV: false }).ToList().ForEach(player =>
-				{
-					player.PrintToCenterHtml(message);
-				});
-
-				// Check if all players have voted
-				if (VotedPlayers.Count == Utilities.GetPlayers().Where(p => p is { IsValid: true, IsBot: false, IsHLTV: false }).Count())
-				{
-					FinishVote();
-				}
-			}
-		});
 	}
 
 	[ConsoleCommand("css_ffa", "Start an FFA vote")]
@@ -94,89 +68,77 @@ public partial class VoteFFAPlugin : BasePlugin, IPluginConfig<Config>
 			return;
 		}
 
-		StartFFAVote();
+		StartFFAVote(caller);
 	}
 
-	public void StartFFAVote()
+	public void StartFFAVote(CCSPlayerController player)
 	{
-		string[] options = [Localizer[$"vote.answers.yes"], Localizer[$"vote.answers.no"]];
-
-		foreach (var item in options)
+		Console.WriteLine($"Starting FFA vote by {player.PlayerName} (FFA active: {(IsFFAActive ? "yes" : "no")})");
+		ToggleVotes(true);
+		var menu = new PanoramaVote("#SFUI_vote_panorama_vote_default", Localizer[$"vote.{(IsFFAActive ? "disable" : "enable")}.title"], VoteResultCallback, VoteHandlerCallback, this)
 		{
-			voteData.Add(item, 0);
-		}
+			// VoteCaller = player
+		};
 
-		float duration = VoteDuration;
-		isVoteActive = true;
+		menu.DisplayVoteToAll(20);
+	}
 
-		ChatMenu voteMenu = new($" {ChatColors.Green}=-=-=-=-= {ChatColors.Lime}{Localizer[$"vote.{(IsFFAActive ? "disable" : "enable")}.title"]} {ChatColors.Green}=-=-=-=-=");
+	public bool VoteResultCallback(YesNoVoteInfo info)
+	{
+		/*
+		public int TotalVotes;
+		public int YesVotes;
+		public int NoVotes;
+		public int TotalClients;
+		public Dictionary<int, (int, int)> ClientInfo = [];
+		*/
 
-		foreach (var item in options)
+		if (info.YesVotes > info.NoVotes)
 		{
-			voteMenu.AddMenuOption(item, (x, i) =>
+			if (IsFFAActive)
 			{
-				if (VotedPlayers.Contains(x))
-				{
-					Helper.AdvancedPrintToChat(x, Localizer["player.already-voted"]);
-				}
+				Helper.PrintToChatAll(Localizer["vote.disable.success"]);
+				IsFFAActive = false;
+			}
+			else
+			{
+				Helper.PrintToChatAll(Localizer["vote.enable.success"]);
+				IsFFAActive = true;
+			}
 
-				Helper.AdvancedPrintToChat(x, Localizer["player.vote-success", item]);
-				AddVote(item);
-				VotedPlayers.Add(x);
-				MenuManager.CloseActiveMenu(x);
-			});
-		}
-
-		Utilities.GetPlayers().Where(p => p is { IsValid: true, IsBot: false, IsHLTV: false }).ToList().ForEach(player =>
-		{
-			MenuManager.CloseActiveMenu(player);
-			MenuManager.OpenChatMenu(player, voteMenu);
-		});
-
-		AddTimer(duration, () =>
-		{
-			FinishVote();
-		});
-	}
-
-	void FinishVote()
-	{
-		Helper.PrintToChatAll($" {ChatColors.Green}=-=-=-=-= {ChatColors.Lime} {Localizer[$"vote.{(IsFFAActive ? "disable" : "enable")}.title"]} {ChatColors.Green}=-=-=-=-=");
-
-		string winner = voteData.OrderByDescending(x => x.Value).First().Key;
-
-		if (winner == Localizer[$"vote.answers.yes"] && !IsFFAActive)
-		{
-			IsFFAActive = true;
-			Helper.PrintToChatAll(Localizer["vote.success"]);
-		}
-		else if (winner == Localizer[$"vote.answers.no"] && IsFFAActive)
-		{
-			IsFFAActive = false;
-			Helper.PrintToChatAll(Localizer["vote.success"]);
+			return true;
 		}
 		else
 		{
 			Helper.PrintToChatAll(Localizer["vote.failed"]);
 		}
 
-		VotedPlayers.Clear();
-		voteData.Clear();
-		isVoteActive = false;
-
-		// Unix timestamp
-		LastVoteTime = (int)DateTime.UtcNow.Subtract(new DateTime(1970, 1, 1)).TotalSeconds;
+		Server.PrintToChatAll("Vote failed!");
+		return false;
 	}
 
-	void AddVote(string candidate)
+	public void VoteHandlerCallback(YesNoVoteAction action, int param1, CastVote param2)
 	{
-		if (voteData.TryGetValue(candidate, out int value))
+		switch (action)
 		{
-			voteData[candidate] = ++value;
-		}
-		else
-		{
-			voteData[candidate] = 1;
+			case YesNoVoteAction.VoteAction_Start:
+				isVoteActive = true;
+				Console.WriteLine("FFA Vote started!");
+				break;
+
+			case YesNoVoteAction.VoteAction_Vote:
+				break;
+
+			case YesNoVoteAction.VoteAction_End:
+				Console.WriteLine($"FFA Vote ended with {param1} votes (Yes: {param2 == CastVote.VOTE_OPTION1})");
+
+				ToggleVotes(false);
+				isVoteActive = false;
+
+				// Unix timestamp
+				LastVoteTime = (int)DateTime.UtcNow.Subtract(new DateTime(1970, 1, 1)).TotalSeconds;
+				break;
+
 		}
 	}
 
@@ -188,5 +150,15 @@ public partial class VoteFFAPlugin : BasePlugin, IPluginConfig<Config>
 		if (IsFFAActive) Helper.PrintToChatAll(Localizer[$"ffa.state.enabled"]);
 
 		return HookResult.Continue;
+	}
+
+	public static void ToggleVotes(bool allow = false)
+	{
+		int option = allow ? 1 : 0;
+
+		Server.ExecuteCommand($"sv_allow_votes {option}");
+		Server.ExecuteCommand($"sv_vote_allow_in_warmup {option}");
+		Server.ExecuteCommand($"sv_vote_allow_spectators {option}");
+		Server.ExecuteCommand($"sv_vote_count_spectator_votes {option}");
 	}
 }
