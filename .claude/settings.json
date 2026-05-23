@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//Users/amir/Projects/Next-il/Plugins/**)",
+      "Bash(find CustomRounds -name \"PanoramaVote.cs\" -not -path '*/bin/*' -not -path '*/obj/*')",
+      "Bash(cp /Users/amir/Projects/Next-il/Plugins/CustomRounds/PanoramaVote.cs /Users/amir/Projects/Next-il/Plugins/VoteFFA/PanoramaVote.cs && echo done)",
+      "Bash(dotnet build *)"
+    ],
+    "additionalDirectories": [
+      "/Users/amir/Projects/Next-il/Plugins/CustomRounds"
+    ]
+  }
+}
