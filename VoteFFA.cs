@@ -1,12 +1,10 @@
-﻿using CounterStrikeSharp.API;
+using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Core.Attributes;
 using CounterStrikeSharp.API.Core.Attributes.Registration;
 using CounterStrikeSharp.API.Modules.Commands;
-using CS2MenuManager.API.Class;
-using CS2MenuManager.API.Enum;
-using CS2MenuManager.API.Menu;
 using Microsoft.Extensions.Localization;
+using PanoramaVote;
 using System.Text.Json.Serialization;
 
 namespace VoteFFA;
@@ -30,15 +28,14 @@ public partial class VoteFFAPlugin : BasePlugin, IPluginConfig<Config>
 
 	internal static IStringLocalizer? Stringlocalizer;
 
-	public int DelayBetweenVotes = 60;
+	public int DelayBetweenVotes = 25;
 	public int VoteDuration = 30;
 	public int LastVoteTime = 0;
 
 	public bool isVoteActive = false;
 	public bool IsFFAActive = false;
 
-	public Dictionary<string, int> voteData = [];
-	public List<CCSPlayerController> VotedPlayers = [];
+	private CPanoramaVote _panoramaVote = null!;
 
 	public void OnConfigParsed(Config config)
 	{
@@ -50,21 +47,29 @@ public partial class VoteFFAPlugin : BasePlugin, IPluginConfig<Config>
 	{
 		base.Load(hotReload);
 		Stringlocalizer = Localizer;
+
+		_panoramaVote = new CPanoramaVote(this);
+		RegisterEventHandler<EventVoteCast>((@event, info) =>
+		{
+			_panoramaVote.VoteCast(@event);
+			return HookResult.Continue;
+		});
 	}
 
 	[ConsoleCommand("css_ffa", "Start an FFA vote")]
 	public void OnVoteCommand(CCSPlayerController caller, CommandInfo command)
 	{
-		if (isVoteActive)
+		if (isVoteActive || _panoramaVote.IsVoteInProgress())
 		{
 			Helper.AdvancedPrintToChat(caller, Localizer["vote.already-in-progress"]);
 			return;
 		}
 
 		// Check if there is a delay between votes
-		if (LastVoteTime + DelayBetweenVotes > (int)DateTime.UtcNow.Subtract(new DateTime(1970, 1, 1)).TotalSeconds)
+		int now = (int)DateTime.UtcNow.Subtract(new DateTime(1970, 1, 1)).TotalSeconds;
+		if (LastVoteTime + DelayBetweenVotes > now)
 		{
-			Helper.AdvancedPrintToChat(caller, Localizer["vote.delay", LastVoteTime + DelayBetweenVotes - (int)DateTime.UtcNow.Subtract(new DateTime(1970, 1, 1)).TotalSeconds]);
+			Helper.AdvancedPrintToChat(caller, Localizer["vote.delay", LastVoteTime + DelayBetweenVotes - now]);
 			return;
 		}
 
@@ -74,26 +79,36 @@ public partial class VoteFFAPlugin : BasePlugin, IPluginConfig<Config>
 	public void StartFFAVote(CCSPlayerController player)
 	{
 		Console.WriteLine($"Starting FFA vote by {player.PlayerName} (FFA active: {(IsFFAActive ? "yes" : "no")})");
-		ToggleVotes(true);
-		var menu = new PanoramaVote("#SFUI_vote_panorama_vote_default", Localizer[$"vote.{(IsFFAActive ? "disable" : "enable")}.title"], VoteResultCallback, VoteHandlerCallback, this)
-		{
-			// VoteCaller = player
-		};
 
-		menu.DisplayVoteToAll(20);
+		ToggleVotes(true);
+		isVoteActive = true;
+
+		string details = Localizer[$"vote.{(IsFFAActive ? "disable" : "enable")}.title"];
+		string hintLabel = Localizer[$"vote.{(IsFFAActive ? "disable" : "enable")}.label"];
+
+		Server.NextFrame(() =>
+		{
+			_panoramaVote.Init();
+			if (!_panoramaVote.SendYesNoVoteToAll(
+				VoteDuration,
+				VoteConstants.VOTE_CALLER_SERVER,
+				VoteConstants.SFUI_Vote_None,
+				details,
+				VoteResultCallback,
+				VoteHandlerCallback,
+				hintPrefix: hintLabel,
+				hintRoundName: "FFA",
+				hintSuffix: "?"))
+			{
+				ToggleVotes(false);
+				isVoteActive = false;
+			}
+		});
 	}
 
 	public bool VoteResultCallback(YesNoVoteInfo info)
 	{
-		/*
-		public int TotalVotes;
-		public int YesVotes;
-		public int NoVotes;
-		public int TotalClients;
-		public Dictionary<int, (int, int)> ClientInfo = [];
-		*/
-
-		if (info.YesVotes > info.NoVotes)
+		if (info.yes_votes > info.no_votes)
 		{
 			if (IsFFAActive)
 			{
@@ -108,16 +123,12 @@ public partial class VoteFFAPlugin : BasePlugin, IPluginConfig<Config>
 
 			return true;
 		}
-		else
-		{
-			Helper.PrintToChatAll(Localizer["vote.failed"]);
-		}
 
-		Server.PrintToChatAll("Vote failed!");
+		Helper.PrintToChatAll(Localizer["vote.failed"]);
 		return false;
 	}
 
-	public void VoteHandlerCallback(YesNoVoteAction action, int param1, CastVote param2)
+	public void VoteHandlerCallback(YesNoVoteAction action, int param1, int param2)
 	{
 		switch (action)
 		{
@@ -130,7 +141,7 @@ public partial class VoteFFAPlugin : BasePlugin, IPluginConfig<Config>
 				break;
 
 			case YesNoVoteAction.VoteAction_End:
-				Console.WriteLine($"FFA Vote ended with {param1} votes (Yes: {param2 == CastVote.VOTE_OPTION1})");
+				Console.WriteLine($"FFA Vote ended (reason: {param1})");
 
 				ToggleVotes(false);
 				isVoteActive = false;
@@ -138,7 +149,6 @@ public partial class VoteFFAPlugin : BasePlugin, IPluginConfig<Config>
 				// Unix timestamp
 				LastVoteTime = (int)DateTime.UtcNow.Subtract(new DateTime(1970, 1, 1)).TotalSeconds;
 				break;
-
 		}
 	}
 

@@ -1,7 +1,9 @@
 {
-  "prefix": "{lime}➜ {grey}FFA {lime}|{default}",
+  "prefix": "{lime}➜ {grey}Next-il {lime}|{default}",
   "vote.enable.title": "Enable FFA?",
   "vote.disable.title": "Disable FFA?",
+  "vote.enable.label": "Enable ",
+  "vote.disable.label": "Disable ",
   "vote.already-in-progress": "A vote is already in progress.",
   "player.already-voted": "You have already voted.",
   "player.vote-success": "You have voted {lime}{0}{default}.",
