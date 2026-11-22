@@ -1,7 +1,10 @@
 # Vote FFA
 
 ## Dependencies
-[CounterStrikeSharp](https://github.com/roflmuffin/CounterStrikeSharp/releases)
+- [CounterStrikeSharp](https://github.com/roflmuffin/CounterStrikeSharp/releases)
+- [Next-il/Votes](https://github.com/Next-il/Votes) v1 or newer: `plugins/Votes` and `shared/VotesApi`. `css_ffa` starts its
+  vote through `VotesApi`, so the vote card, F1/F2 and the `sv_allow_votes` window all come from Votes. Without it the
+  command tells the player votes are unavailable.
 
 ## Configuration
 
@@ -15,6 +18,9 @@ Config Located In `addons\counterstrikesharp\plugins\configs\VoteFFA\VoteFFA.jso
 
   // Vote duration
   "VoteDuration": 30,
+
+  // Passes when yes reaches this % of everyone who can vote, and beats no
+  "PassPercent": 51,
 }
 ```
 
