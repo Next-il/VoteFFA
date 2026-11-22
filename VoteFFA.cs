@@ -4,8 +4,9 @@ using CounterStrikeSharp.API.Core.Attributes;
 using CounterStrikeSharp.API.Core.Attributes.Registration;
 using CounterStrikeSharp.API.Modules.Commands;
 using Microsoft.Extensions.Localization;
-using PanoramaVote;
+using Microsoft.Extensions.Logging;
 using System.Text.Json.Serialization;
+using VotesApi;
 
 namespace VoteFFA;
 
@@ -16,13 +17,17 @@ public class Config : BasePluginConfig
 
 	[JsonPropertyName("VoteDuration")]
 	public int VoteDuration { get; set; } = 30; // Vote duration
+
+	// Passes when yes reaches this share of everyone who can vote, and beats no - the rule every Votes vote uses.
+	[JsonPropertyName("PassPercent")]
+	public float PassPercent { get; set; } = 51f;
 };
 
 [MinimumApiVersion(333)]
 public partial class VoteFFAPlugin : BasePlugin, IPluginConfig<Config>
 {
 	public override string ModuleName => "VoteFFA";
-	public override string ModuleVersion => "1.0.0";
+	public override string ModuleVersion => "1.1.0";
 	public override string ModuleAuthor => "ShiNxz";
 	public Config Config { get; set; } = new Config();
 
@@ -35,10 +40,22 @@ public partial class VoteFFAPlugin : BasePlugin, IPluginConfig<Config>
 	public bool isVoteActive = false;
 	public bool IsFFAActive = false;
 
-	private CPanoramaVote _panoramaVote = null!;
+	/// <summary>
+	/// Next-il/Votes, looked up on every use because it can load after this plugin. Votes owns the game's vote
+	/// controller, the sv_allow_votes window and the vote card; this plugin only says what to ask.
+	/// </summary>
+	private static IVotesApi? Votes
+	{
+		get
+		{
+			try { return IVotesApi.Capability.Get(); }
+			catch { return null; }
+		}
+	}
 
 	public void OnConfigParsed(Config config)
 	{
+		Config = config;
 		DelayBetweenVotes = config.Delay;
 		VoteDuration = config.VoteDuration;
 	}
@@ -47,19 +64,14 @@ public partial class VoteFFAPlugin : BasePlugin, IPluginConfig<Config>
 	{
 		base.Load(hotReload);
 		Stringlocalizer = Localizer;
-
-		_panoramaVote = new CPanoramaVote(this);
-		RegisterEventHandler<EventVoteCast>((@event, info) =>
-		{
-			_panoramaVote.VoteCast(@event);
-			return HookResult.Continue;
-		});
 	}
 
 	[ConsoleCommand("css_ffa", "Start an FFA vote")]
-	public void OnVoteCommand(CCSPlayerController caller, CommandInfo command)
+	public void OnVoteCommand(CCSPlayerController? caller, CommandInfo command)
 	{
-		if (isVoteActive || _panoramaVote.IsVoteInProgress())
+		if (caller is not { IsValid: true }) return;
+
+		if (isVoteActive || (Votes?.IsVoteActive ?? false))
 		{
 			Helper.AdvancedPrintToChat(caller, Localizer["vote.already-in-progress"]);
 			return;
@@ -78,78 +90,58 @@ public partial class VoteFFAPlugin : BasePlugin, IPluginConfig<Config>
 
 	public void StartFFAVote(CCSPlayerController player)
 	{
-		Console.WriteLine($"Starting FFA vote by {player.PlayerName} (FFA active: {(IsFFAActive ? "yes" : "no")})");
+		IVotesApi? votes = Votes;
+		if (votes == null)
+		{
+			Logger.LogError("Votes is not loaded: the FFA vote needs Next-il/Votes (plugins/Votes + shared/VotesApi).");
+			Helper.AdvancedPrintToChat(player, Text("vote.unavailable", "Votes are not available right now."));
+			return;
+		}
 
-		ToggleVotes(true);
+		bool disabling = IsFFAActive;
+		Logger.LogInformation("Starting FFA vote by {Player} (FFA active: {Active})", player.PlayerName, disabling ? "yes" : "no");
+
 		isVoteActive = true;
-
-		string details = Localizer[$"vote.{(IsFFAActive ? "disable" : "enable")}.title"];
-		string hintLabel = Localizer[$"vote.{(IsFFAActive ? "disable" : "enable")}.label"];
-
-		Server.NextFrame(() =>
+		bool started = votes.StartYesNo(new YesNoVote
 		{
-			_panoramaVote.Init();
-			if (!_panoramaVote.SendYesNoVoteToAll(
-				VoteDuration,
-				VoteConstants.VOTE_CALLER_SERVER,
-				VoteConstants.SFUI_Vote_None,
-				details,
-				VoteResultCallback,
-				VoteHandlerCallback,
-				hintPrefix: hintLabel,
-				hintRoundName: "FFA",
-				hintSuffix: "?"))
-			{
-				ToggleVotes(false);
-				isVoteActive = false;
-			}
+			Owner = ModuleName,
+			Caller = player,
+			Eyebrow = Text("vote.eyebrow", "Vote · FFA"),
+			Prefix = Localizer[$"vote.{(disabling ? "disable" : "enable")}.label"].Value.Trim(),
+			Subject = "FFA",
+			DurationSeconds = VoteDuration,
+			PassPercent = Config.PassPercent,
+			PassedText = disabling ? Text("vote.disable.card", "normal rounds next round") : Text("vote.enable.card", "FFA from next round"),
+			OnEnd = result => OnVoteEnded(result, disabling),
 		});
+
+		if (!started)
+		{
+			isVoteActive = false;
+			Helper.AdvancedPrintToChat(player, Localizer["vote.already-in-progress"]);
+		}
 	}
 
-	public bool VoteResultCallback(YesNoVoteInfo info)
+	private void OnVoteEnded(VoteResult result, bool disabling)
 	{
-		if (info.yes_votes > info.no_votes)
-		{
-			if (IsFFAActive)
-			{
-				Helper.PrintToChatAll(Localizer["vote.disable.success"]);
-				IsFFAActive = false;
-			}
-			else
-			{
-				Helper.PrintToChatAll(Localizer["vote.enable.success"]);
-				IsFFAActive = true;
-			}
+		isVoteActive = false;
 
-			return true;
+		// Unix timestamp
+		LastVoteTime = (int)DateTime.UtcNow.Subtract(new DateTime(1970, 1, 1)).TotalSeconds;
+
+		Logger.LogInformation("FFA vote ended ({Reason}): {Yes} yes, {No} no of {Voters} - {Outcome}",
+			result.Reason, result.Tally.Yes, result.Tally.No, result.Tally.Voters, result.Passed ? "passed" : "failed");
+
+		if (result.Passed)
+		{
+			// Set from the state the vote asked about, not flipped, so it can never toggle the wrong way.
+			IsFFAActive = !disabling;
+			Helper.PrintToChatAll(Localizer[disabling ? "vote.disable.success" : "vote.enable.success"]);
+			return;
 		}
 
-		Helper.PrintToChatAll(Localizer["vote.failed"]);
-		return false;
-	}
-
-	public void VoteHandlerCallback(YesNoVoteAction action, int param1, int param2)
-	{
-		switch (action)
-		{
-			case YesNoVoteAction.VoteAction_Start:
-				isVoteActive = true;
-				Console.WriteLine("FFA Vote started!");
-				break;
-
-			case YesNoVoteAction.VoteAction_Vote:
-				break;
-
-			case YesNoVoteAction.VoteAction_End:
-				Console.WriteLine($"FFA Vote ended (reason: {param1})");
-
-				ToggleVotes(false);
-				isVoteActive = false;
-
-				// Unix timestamp
-				LastVoteTime = (int)DateTime.UtcNow.Subtract(new DateTime(1970, 1, 1)).TotalSeconds;
-				break;
-		}
+		if (result.Reason != VoteEndReason.Cancelled)
+			Helper.PrintToChatAll(Localizer["vote.failed"]);
 	}
 
 	[GameEventHandler]
@@ -162,13 +154,10 @@ public partial class VoteFFAPlugin : BasePlugin, IPluginConfig<Config>
 		return HookResult.Continue;
 	}
 
-	public static void ToggleVotes(bool allow = false)
+	/// <summary>A lang key, or the English default when the server's lang file does not have it yet.</summary>
+	private string Text(string key, string fallback)
 	{
-		int option = allow ? 1 : 0;
-
-		Server.ExecuteCommand($"sv_allow_votes {option}");
-		Server.ExecuteCommand($"sv_vote_allow_in_warmup {option}");
-		Server.ExecuteCommand($"sv_vote_allow_spectators {option}");
-		Server.ExecuteCommand($"sv_vote_count_spectator_votes {option}");
+		var value = Localizer[key];
+		return value.ResourceNotFound ? fallback : value.Value;
 	}
 }

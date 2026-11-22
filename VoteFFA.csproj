@@ -14,6 +14,13 @@
       <HintPath>$(MSBuildThisFileDirectory)CS2MenuManager.dll</HintPath>
       <Private>true</Private>
     </Reference>
+    <!-- Next-il/Votes API, the build committed in lib/. Private=false: it must resolve from
+         addons/counterstrikesharp/shared/VotesApi/, where the Votes release puts it. A copy beside this plugin
+         gives it its own IVotesApi type and the capability lookup comes back empty. -->
+    <Reference Include="VotesApi">
+      <HintPath>$(MSBuildThisFileDirectory)lib\VotesApi.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
   </ItemGroup>
 
   <ItemGroup>
